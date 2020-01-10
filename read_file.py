@@ -23,35 +23,46 @@ def _range(d):
 
 
 class read_file:
-    def __init__(self, path, tagsee_fix=False, fix_order=[0,1,3,2,5,4], pos_dic=None):
-        #TODO better header
-        self.data = pd.read_csv(path, header=None)
-        if tagsee_fix:
-            self.data = self.data[fix_order]
-            self.data.columns=range(6)
-            self.data[3] = (4096-self.data[3])/4096*2*math.pi
-        self.data[0] = self.data[0].str.slice(-4).astype(np.int)
-        self.data[1] = self.data[1].astype(np.int)
-        self.data.index = map(
-            lambda x: datetime.fromtimestamp(x/1e6), self.data[4])
-        self.data.index = pd.to_datetime(self.data.index)
-        self.ids = list(set(self.data[0]))
-        self.ants = list(set(self.data[1]))
-        self.allchannels = list(set(self.data[5]))
-        self.allchannels.sort()
-        self.time = _range(self.data[4])/1e6
-        self.pos_dic = pos_dic
-    
+    def __init__(self, path, header=None, pos_dic=None, columns=None):
+        '''
+        min-headers: EPC, Ant_ID, RSSI, phase, Timestamp, channel
+        others: ID(from EPC), pos, dis
+        '''
+        self.data = pd.read_csv(path, header=header)
+        if (header == None): self.data.columns = columns
+        self.generate_ID()
+        self.data.index = map(lambda x: datetime.fromtimestamp(x/1e6), self.data["Timestamp"])
+        self.data.index = pd.to_datetime(self.data.index) # have to?
+        self.ids = list(set(self.data["ID"]))
+        self.ants = list(set(self.data["Ant_ID"]))
+        self.channels = list(set(self.data["channel"]))
+        self.channels.sort()
+        self.time = _range(self.data["Timestamp"])/1e6
+
+
+    def generate_ID(self,num=4):
+        '''
+        turn last n(default:4) characters into int ID
+        ! only work with digit
+        '''
+        self.data["ID"] = self.data["EPC"].str.slice(-num).astype(np.int)
+
+
+    def tagsee_fix(self):
+        self.data["phase"] = (4096-self.data["phase"])/4096*2*math.pi
+
     def cac_pos_dis(self, pos_dic):
-        #TODO better header
-        self.data["pos"] = [list(pos_dic[_]) for _ in self.data[0]]
+        self.data["pos"] = [list(pos_dic[_]) for _ in self.data["ID"]]
         self.data["dis"] = get_distance_3d(np.asarray(list(self.data["pos"])),[0,0,2.37])
         self.data.head()
     
     def get_channels(self, _id, ant):
-        #TODO better header
+        '''
+        get channels by ant_ID
+        ID #TODO
+        '''
         t = self.get_data(_id, ant)
-        return list(set(t[5]))
+        return list(set(t["channel"]))
 
     def _resample(self, d, rule="0.01S"):
         d = d.resample(rule).bfill()
@@ -61,11 +72,11 @@ class read_file:
         #TODO better header
         t = self.data
         if _id!=None:
-            t = t.loc[t[0] == _id]
+            t = t.loc[t["ID"] == _id]
         if ant!=None:
-            t = t.loc[t[1] == ant]
+            t = t.loc[t["Ant_ID"] == ant]
         if c != None:
-            t = t.loc[t[5] == c]
+            t = t.loc[t["Channel"] == c]
         if isresample == True:
             t = self.resample(t,rule)
         if p_ant == None:  
@@ -118,10 +129,10 @@ class read_file:
     def show_count_by_c(self, ant, return_data=False, show_num=True):
         #TODO better header
         n_id = len(self.ids)
-        n_c = len(self.allchannels)
+        n_c = len(self.channels)
         count = np.zeros((n_id, n_c))
         for _, _id in enumerate(self.ids):
-            for __, c in enumerate(self.allchannels):
+            for __, c in enumerate(self.channels):
                 count[_,__] = self.get_count(_id,ant,c)
 #         for _id in self.ids:
 #             for ant in self.ants:
@@ -131,7 +142,7 @@ class read_file:
 #         fig = plt.figure()
         ax=plt.gca()
         ax.set_xticks(range(n_c))
-        ax.set_xticklabels(self.allchannels)
+        ax.set_xticklabels(self.channels)
         ax.set_yticks(range(n_id))
         ax.set_yticklabels(self.ids)
         if show_num:
@@ -189,7 +200,7 @@ class read_file:
 
     def plt_any_one(self):
         #TODO better header
-        channel_options = [(str(_), _) for _ in self.allchannels]
+        channel_options = [(str(_), _) for _ in self.channels]
         channel_options.insert(0, ("All", 0))
 
         return widgets.SelectMultiple(options=self.ids, description="tag_ID:"),\
